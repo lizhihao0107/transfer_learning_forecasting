@@ -5,7 +5,7 @@
 # datetime:2024-02-06 16:27
 # software: PyCharm
 
-
+from model_self import MultiHeadedAttention,PositionwiseFeedForward
 import pandas as pd
 import numpy as np
 import math
@@ -20,7 +20,7 @@ from model import TransformerModel
 import model_self
 def pre_data():
     data_frames=[]
-    for i in range(1,31):
+    for i in range(1,2):
         file_name=f'./data/{i}.csv'
         data = pd.read_csv(file_name, parse_dates={'datetime': ['date', 'time']}, index_col='datetime')
         training_data_len = math.ceil(len(data) * .9)
@@ -57,25 +57,27 @@ def pre_data():
 
 def pre_train(data,model,device,criterion,optimizer):
     batch_size = 32
-    num_epochs = 10  # 训练轮数
-    for i in range(0,30):
-        print(i)
+    num_epochs = 1  # 训练轮数
+    for i in range(0,1):
         for epoch in range(num_epochs):
             model.train()
-            for i in range(0, len(data[i]["X_train"]), batch_size):
+            for j in range(0, len(data[i]["X_train"]), batch_size):
                 # 获取批次数据
-                inputs = data[i]["X_train"][i:i + batch_size].to(device)
-                labels = data[i]["y_train"][i:i + batch_size].to(device)
-                # 前向传播
+                inputs = data[i]["X_train"][j:j + batch_size].to(device)
+                labels = data[i]["y_train"][j:j + batch_size].to(device)
                 outputs = model(inputs,[0,0,0,0])
                 loss = criterion(outputs.squeeze(), labels)
-                # 反向传播和优化
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
             print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.6f}')
 
-
+def copy_parameters(src_module, dest_module):
+    """
+    复制参数从源模块到目标模块。
+    """
+    for src_param, dest_param in zip(src_module.parameters(), dest_module.parameters()):
+        dest_param.data.copy_(src_param.data)
 
 def main_():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -86,40 +88,41 @@ def main_():
     num_heads = 2  # 多头注意力机制的头数
     num_layers = 4  # 编码器层的数量
     output_dim = 1  # 输出维度，预测一个标签值
-    # 初始化模型
     model = model_self.TransformerModel(input_dim, model_dim, num_heads, num_layers, output_dim).to(device)
-    # 定义损失函数和优化器
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    # 训练数据
-    # 假设X_train和y_train已经是正确的形状：X_train [30038, 30, 7], y_train [30038]
-    # 由于代码限制，这里不再演示数据加载部分
+    # X_train [30038, 30, 7], y_train [30038]
     pre_train(data,model,device,criterion,optimizer)
-    for layer in enumerate(model.transformer_encoder.layers):
+    for module in model.modules():
+        if isinstance(module, MultiHeadedAttention):
+            for src_linear, dest_linear in zip(module.linears, module.linears_parallel):
+                copy_parameters(src_linear, dest_linear)
+        elif isinstance(module, PositionwiseFeedForward):
+            copy_parameters(module.w_1, module.w_1_parallel)
+            copy_parameters(module.w_2, module.w_2_parallel)
 
 
-
-    model.eval()
-    predictions = []
-    with torch.no_grad():  # 在不计算梯度的情况下执行前向传播，以节省内存并加速
-        for i in range(len(X_test)):
-            inputs = X_test[i:i + 1].to(device)  # 获取单个样本进行预测
-            output = model(inputs)
-            predictions.append(output.cpu().item())  # 存储预测结果
-    predictions_tensor = torch.tensor(predictions, dtype=torch.float32)
-    # 计算均方误差
-    mse = criterion(predictions_tensor, y_test)
-    print(f'Test L1loss: {mse.item()}')
-    # 将y_test转换为列表以便绘图
-    true_values = y_test.tolist()
-    plt.figure(figsize=(12, 6))  # 设置图形的大小
-    plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
-    plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
-    plt.title('True Values vs Predictions')  # 图形标题
-    plt.xlabel('Sample Index')  # x轴标签
-    plt.ylabel('Value')  # y轴标签
-    plt.legend()  # 显示图例
-    plt.show()
+    # model.eval()
+    # predictions = []
+    # with torch.no_grad():  # 在不计算梯度的情况下执行前向传播，以节省内存并加速
+    #     for i in range(len(X_test)):
+    #         inputs = X_test[i:i + 1].to(device)  # 获取单个样本进行预测
+    #         output = model(inputs)
+    #         predictions.append(output.cpu().item())  # 存储预测结果
+    # predictions_tensor = torch.tensor(predictions, dtype=torch.float32)
+    # # 计算均方误差
+    # mse = criterion(predictions_tensor, y_test)
+    # print(f'Test L1loss: {mse.item()}')
+    # # 将y_test转换为列表以便绘图
+    # true_values = y_test.tolist()
+    # plt.figure(figsize=(12, 6))  # 设置图形的大小
+    # plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
+    # plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
+    # plt.title('True Values vs Predictions')  # 图形标题
+    # plt.xlabel('Sample Index')  # x轴标签
+    # plt.ylabel('Value')  # y轴标签
+    # plt.legend()  # 显示图例
+    # plt.show()
 
 
 if __name__ == '__main__':

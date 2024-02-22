@@ -66,25 +66,26 @@ class MultiHeadedAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, key, value,action, mask=None):
+    def forward(self, query, key, value, action, mask=None):
         # 注意，输入query的形状类似于(30, 10, 512)，
         # key.size() ~ (30, 11, 512),
         # 以及value.size() ~ (30, 11, 512)
         nbatches = query.size(0)  # e.g., nbatches=30
-        if action==0:
+        if action == 0:
             query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k)
                                      .transpose(1, 2) for l, x in zip(self.linears, (query, key, value))]
             x, self.attn = attention(query, key, value, mask=mask,
                                      dropout=self.dropout)
             x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
             return self.linears[-1](x)
-        elif action==1:
+        elif action == 1:
             query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k)
                                      .transpose(1, 2) for l, x in zip(self.linears_parallel, (query, key, value))]
             x, self.attn = attention(query, key, value, mask=mask,
                                      dropout=self.dropout)
             x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
             return self.linears_parallel[-1](x)
+
 
 class LayerNorm(nn.Module):
     "Construct a layernorm module (See citation for details)."
@@ -120,14 +121,18 @@ class SublayerConnection(nn.Module):
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(size)  # (512)，用来定义a_2和b_2
         self.dropout = nn.Dropout(dropout)
+        self.flag = 0
 
-    def forward(self, x, sublayer, action):
+    def forward(self, x, sublayer, *action):
         "Apply residual connection to any sublayer with the "
         "same size."
         # x is alike (batch.size, sequence.len, 512)
         # sublayer是一个具体的MultiHeadAttention
         # 或者PositionwiseFeedForward对象
-        return x + self.dropout(sublayer(self.norm(x), action))
+        if self.flag == 0:
+            return x + self.dropout(sublayer(self.norm(x)))
+        elif self.flag == 1:
+            return x + self.dropout(sublayer(self.norm(x), action[0]))
         # x (30, 10, 512) -> norm (LayerNorm) -> (30, 10, 512)
         # -> sublayer (MultiHeadAttention or PositionwiseFeedForward)-> (30, 10, 512) -> dropout -> (30, 10, 512)
         # 然后输入的x（没有走sublayer) + 上面的结果，
@@ -147,7 +152,7 @@ class PositionwiseFeedForward(nn.Module):
         # weights矩阵，(512, 2048)，以及
         # biases偏移向量, (2048)
         self.w_2 = nn.Linear(d_ff, d_model)
-        self.w_2_parallel = nn.Linear(d_model, d_ff)
+        self.w_2_parallel = nn.Linear(d_ff, d_model)
         # 构建第二个全连接层, (2048, 512)，两种可训练参数：
         # weights矩阵，(2048, 512)，以及
         # biases偏移向量, (512)
@@ -178,12 +183,14 @@ class EncoderLayer(nn.Module):
         self.feed_forward = feed_forward
         self.sublayer = clones(SublayerConnection(size, dropout), 2)
         # 使用深度克隆方法，完整地复制出来两个SublayerConnection
+        self.sublayer[0].flag = 0
+        self.sublayer[1].flag = 1
         self.size = size  # 512
 
     def forward(self, x, action):
         "Follow Figure 1 (left) for connections."
         # x shape = (30, 10, 512)
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x), action)
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, action))
         # x (30, 10, 512) -> self_attn (MultiHeadAttention)
         # shape is same (30, 10, 512) -> SublayerConnection-> (30, 10, 512)
         return self.sublayer[1](x, self.feed_forward, action)
@@ -191,8 +198,6 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    "Core encoder is a stack of N layers"
-
     def __init__(self, layer, N):
         # layer = one EncoderLayer object, N=6
         super(Encoder, self).__init__()
