@@ -29,4 +29,3 @@ def gumbel_softmax(logits, temperature = 5):
     y_hard.scatter_(1, ind.view(-1, 1), 1)
     y_hard = y_hard.view(*shape)
     return (y_hard - y).detach() + y
-

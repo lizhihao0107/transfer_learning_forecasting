@@ -6,7 +6,6 @@
 # datetime:2024-02-07 17:22
 # software: PyCharm
 import math
-import transformer
 import torch
 import torch.nn as nn
 import torch.optim as optim

@@ -152,25 +152,27 @@ def main_():
             copy_parameters(module.w_2, module.w_2_parallel)
     data_finetune=finetune_data()
     finetune(data_finetune,model,device,criterion,optimizer)
-    model.eval()
-    predictions = []
-    with torch.no_grad():
-        for i in range(len(data_finetune["X_test"])):
-            inputs = data_finetune["X_test"][i:i + 1].to(device)
-            output = model(inputs,[1,1,1,1])
-            predictions.append(output.cpu().item())  # 存储预测结果
-    predictions_tensor = torch.tensor(predictions, dtype=torch.float32)
-    L1 = criterion(predictions_tensor,data_finetune["y_test"] )
-    print(f'Test L1loss: {L1.item()}')
-    true_values = data_finetune["y_test"].tolist()
-    plt.figure(figsize=(12, 6))  # 设置图形的大小
-    plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
-    plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
-    plt.title('True Values vs Predictions')  # 图形标题
-    plt.xlabel('Sample Index')  # x轴标签
-    plt.ylabel('Value')  # y轴标签
-    plt.legend()  # 显示图例
-    plt.show()
+
+
+    # model.eval()
+    # predictions = []
+    # with torch.no_grad():
+    #     for i in range(len(data_finetune["X_test"])):
+    #         inputs = data_finetune["X_test"][i:i + 1].to(device)
+    #         output = model(inputs,[1,1,1,1])
+    #         predictions.append(output.cpu().item())
+    # predictions_tensor = torch.tensor(predictions, dtype=torch.float32)
+    # L1 = criterion(predictions_tensor,data_finetune["y_test"] )
+    # print(f'Test L1loss: {L1.item()}')
+    # true_values = data_finetune["y_test"].tolist()
+    # plt.figure(figsize=(12, 6))
+    # plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
+    # plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
+    # plt.title('True Values vs Predictions')  # 图形标题
+    # plt.xlabel('Sample Index')
+    # plt.ylabel('Value')
+    # plt.legend()
+    # plt.show()
 
 
 if __name__ == '__main__':

@@ -5,14 +5,10 @@
 # author:lizhihao
 # datetime:2024-02-15 0:28
 # software: PyCharm
-import math
-import torch
-import torch.nn as nn
-import torch.optim as optim
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math, copy, time
+import math, copy
 
 
 def attention(query, key, value, mask=None, dropout=None):
@@ -252,5 +248,11 @@ class TransformerModel(nn.Module):
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src, policy)
         output = output.permute(1, 0, 2)  # 转换回原来的维度
+        print("output1")
+        print(output[:, -1, :].shape)
         output = self.output_linear(output[:, -1, :])  # 只取序列的最后一个时间步的输出用于预测
+        print("output2")
+        print(output.shape)
+        print("output3")
+        print(output.squeeze().shape)
         return output
