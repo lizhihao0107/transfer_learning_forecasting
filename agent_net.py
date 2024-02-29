@@ -20,7 +20,6 @@ def attention(query, key, value, mask=None, dropout=None):
     # 64是每个词对应的向量表示。
     # 类似于，这里假定query来自target language sequence；
     # key和value都来自source language sequence.
-    "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)  # 64=d_k
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)  # 先是(30,8,10,64)和(30, 8, 64, 11)相乘，
     # （注意是最后两个维度相乘）得到(30,8,10,11)，
@@ -50,7 +49,6 @@ def clones(module, N):
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1):
         # h=8, d_model=512
-        "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0  # We assume d_v always equals d_k 512%8=0
         self.d_k = d_model // h  # d_k=512//8=64
@@ -62,30 +60,20 @@ class MultiHeadedAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, key, value, action, mask=None):
+    def forward(self, query, key, value, mask=None):
         # 注意，输入query的形状类似于(30, 10, 512)，
         # key.size() ~ (30, 11, 512),
         # 以及value.size() ~ (30, 11, 512)
         nbatches = query.size(0)  # e.g., nbatches=30
-        if action == 0:
-            query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k)
+        query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k)
                                      .transpose(1, 2) for l, x in zip(self.linears, (query, key, value))]
-            x, self.attn = attention(query, key, value, mask=mask,
+        x, self.attn = attention(query, key, value, mask=mask,
                                      dropout=self.dropout)
-            x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
-            return self.linears[-1](x)
-        elif action == 1:
-            query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k)
-                                     .transpose(1, 2) for l, x in zip(self.linears_parallel, (query, key, value))]
-            x, self.attn = attention(query, key, value, mask=mask,
-                                     dropout=self.dropout)
-            x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
-            return self.linears_parallel[-1](x)
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        return self.linears[-1](x)
 
 
 class LayerNorm(nn.Module):
-    "Construct a layernorm module (See citation for details)."
-
     def __init__(self, features, eps=1e-6):
         # features=d_model=512, eps=epsilon 用于分母的非0化平滑
         super(LayerNorm, self).__init__()
@@ -107,28 +95,16 @@ class LayerNorm(nn.Module):
 
 
 class SublayerConnection(nn.Module):
-    """
-    A residual connection followed by a layer norm.
-    Note for code simplicity the norm is first as opposed to last.
-    """
-
     def __init__(self, size, dropout):
         # size=d_model=512; dropout=0.1
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(size)  # (512)，用来定义a_2和b_2
         self.dropout = nn.Dropout(dropout)
-        self.flag = 0
 
-    def forward(self, x, sublayer, *action):
-        "Apply residual connection to any sublayer with the "
-        "same size."
+    def forward(self, x, sublayer):
         # x is alike (batch.size, sequence.len, 512)
-        # sublayer是一个具体的MultiHeadAttention
-        # 或者PositionwiseFeedForward对象
-        if self.flag == 0:
-            return x + self.dropout(sublayer(self.norm(x)))
-        elif self.flag == 1:
-            return x + self.dropout(sublayer(self.norm(x), action[0]))
+        # sublayer是一个具体的MultiHeadAttention或者PositionwiseFeedForward对象
+        return x + self.dropout(sublayer(self.norm(x)))
         # x (30, 10, 512) -> norm (LayerNorm) -> (30, 10, 512)
         # -> sublayer (MultiHeadAttention or PositionwiseFeedForward)-> (30, 10, 512) -> dropout -> (30, 10, 512)
         # 然后输入的x（没有走sublayer) + 上面的结果，
@@ -136,39 +112,28 @@ class SublayerConnection(nn.Module):
 
 
 class PositionwiseFeedForward(nn.Module):
-    "Implements FFN equation."
-
     def __init__(self, d_model, d_ff, dropout=0.1):
         # d_model = 512
         # d_ff = 2048 = 512*4
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
-        self.w_1_parallel = nn.Linear(d_model, d_ff)
         # 构建第一个全连接层，(512, 2048)，其中有两种可训练参数：
         # weights矩阵，(512, 2048)，以及
         # biases偏移向量, (2048)
         self.w_2 = nn.Linear(d_ff, d_model)
-        self.w_2_parallel = nn.Linear(d_ff, d_model)
         # 构建第二个全连接层, (2048, 512)，两种可训练参数：
         # weights矩阵，(2048, 512)，以及
         # biases偏移向量, (512)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, action):
+    def forward(self, x):
         # x shape = (batch.size, sequence.len, 512)
-        # 例如, (30, 10, 512)
-        if action == 0:
-            return self.w_2(self.dropout(F.relu(self.w_1(x))))
-        elif action == 1:
-            return self.w_2_parallel(self.dropout(F.relu(self.w_1_parallel(x))))
+        return self.w_2(self.dropout(F.relu(self.w_1(x))))
         # x (30, 10, 512) -> self.w_1 -> (30, 10, 2048)-> relu -> (30, 10, 2048)-> dropout -> (30, 10, 2048)
         # -> self.w_2 -> (30, 10, 512)是输出的shape
 
 
 class EncoderLayer(nn.Module):
-    "Encoder is made up of self-attn and "
-    "feed forward (defined below)"
-
     def __init__(self, size, self_attn, feed_forward, dropout=0.1):
         # size=d_model=512
         # self_attn = MultiHeadAttention对象, first sublayer
@@ -179,17 +144,13 @@ class EncoderLayer(nn.Module):
         self.feed_forward = feed_forward
         self.sublayer = clones(SublayerConnection(size, dropout), 2)
         # 使用深度克隆方法，完整地复制出来两个SublayerConnection
-        self.sublayer[0].flag = 0
-        self.sublayer[1].flag = 1
         self.size = size  # 512
 
-    def forward(self, x, action):
-        "Follow Figure 1 (left) for connections."
-        # x shape = (30, 10, 512)
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, action))
+    def forward(self, x):
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
         # x (30, 10, 512) -> self_attn (MultiHeadAttention)
         # shape is same (30, 10, 512) -> SublayerConnection-> (30, 10, 512)
-        return self.sublayer[1](x, self.feed_forward, action)
+        return self.sublayer[1](x, self.feed_forward)
         # x 和feed_forward对象一起，给第二个SublayerConnection
 
 
@@ -203,12 +164,11 @@ class Encoder(nn.Module):
         # 定义一个LayerNorm，layer.size=d_model=512
         # 其中有两个可训练参数a_2和b_2
 
-    def forward(self, x, policy):
-        "Pass the input (and mask) through each layer in turn."
+    def forward(self, x):
         # x is alike (30, 10, 512)
         # (batch.size, sequence.len, d_model)
         for i, layer in enumerate(self.layers):
-            x = layer(x, policy[i])
+            x = layer(x)
             # 进行六次EncoderLayer操作
         return self.norm(x)
         # 最后做一次LayerNorm，最后的输出也是(30, 10, 512) shape
@@ -242,11 +202,9 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = Encoder(self.encoder_layer, num_layers)
         self.output_linear = nn.Linear(model_dim, output_dim)
 
-    def forward(self, src, policy):
+    def forward(self, src):
         src = self.input_linear(src)  # [batch_size, seq_length, input_dim] -> [batch_size, seq_length, model_dim]
-        src = src.permute(1, 0, 2)  # 调整维度以符合Transformer的输入要求：[seq_length, batch_size, model_dim]
         src = self.pos_encoder(src)
-        output = self.transformer_encoder(src, policy)
-        output = output.permute(1, 0, 2)  # 转换回原来的维度
+        output = self.transformer_encoder(src)
         output = self.output_linear(output[:, -1, :])  # 只取序列的最后一个时间步的输出用于预测
         return output
