@@ -19,6 +19,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from model import TransformerModel
 import model_self
+import random
 
 
 def pre_data():
@@ -26,6 +27,7 @@ def pre_data():
     for i in range(1, 2):
         file_name = f'./data/{i}.csv'
         data = pd.read_csv(file_name, parse_dates={'datetime': ['date', 'time']}, index_col='datetime')
+        data = data[:1000]
         training_data_len = math.ceil(len(data) * .9)
         train_data = data[:training_data_len]
         test_data = data[training_data_len:]
@@ -68,7 +70,6 @@ def pre_train(data, model, device, criterion, optimizer, num_layers):
         for epoch in range(num_epochs):
             model.train()
             for j in range(0, len(data[i]["X_train"]), batch_size):
-                print(j)
                 # 获取批次数据
                 inputs = data[i]["X_train"][j:j + batch_size].to(device)
                 labels = data[i]["y_train"][j:j + batch_size].to(device)
@@ -83,6 +84,7 @@ def pre_train(data, model, device, criterion, optimizer, num_layers):
 def finetune_data():
     file_name = f'./data/{29}.csv'
     data = pd.read_csv(file_name, parse_dates={'datetime': ['date', 'time']}, index_col='datetime')
+    data = data[:1000]
     training_data_len = math.ceil(len(data) * .9)
     train_data = data[:training_data_len]
     test_data = data[training_data_len:]
@@ -118,8 +120,26 @@ def finetune_data():
 def finetune(data, model, device, criterion, optimizer, num_layers):
     print("-----finetune------")
     batch_size = 32
-    num_epochs = 10  # 训练轮数
+    num_epochs = 10
     policy = np.ones((batch_size, num_layers))
+    for epoch in range(num_epochs):
+        model.train()
+        for j in range(0, len(data["X_train"]), batch_size):
+            inputs = data["X_train"][j:j + batch_size].to(device)
+            labels = data["y_train"][j:j + batch_size].to(device)
+            outputs = model(inputs, policy)
+            loss = criterion(outputs.squeeze(), labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.6f}')
+
+
+def control_group_finetune(data, model, device, criterion, optimizer, num_layers):
+    print("-----control_group_finetune------")
+    batch_size = 32
+    num_epochs = 10  # 训练轮数
+    policy = np.zeros((batch_size, num_layers))
     for epoch in range(num_epochs):
         model.train()
         for j in range(0, len(data["X_train"]), batch_size):
@@ -143,14 +163,14 @@ def agent_train(model, agent, data, device, criterion, optimizer):
     model.train()
     agent.train()
     batch_size = 32
-    num_epochs = 10  # 训练轮数
+    num_epochs = 10
     for epoch in range(num_epochs):
         for j in range(0, len(data["X_train"]), batch_size):
             inputs = data["X_train"][j:j + batch_size].to(device)
             probs = agent(inputs)
             action = gumbel_softmax(probs.view(probs.size(0), -1, 2))
             policy = action[:, :, 1]
-            outputs = model(data, policy)
+            outputs = model(inputs, policy)
             labels = data["y_train"][j:j + batch_size].to(device)
             loss = criterion(outputs.squeeze(), labels)
             optimizer.zero_grad()
@@ -160,6 +180,11 @@ def agent_train(model, agent, data, device, criterion, optimizer):
 
 
 def main_():
+    print("------spottune_model------")
+    seed = 42
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data_pre = pre_data()
     # 模型参数
@@ -170,7 +195,7 @@ def main_():
     output_dim = 1  # 输出维度，预测一个标签值
     policy_dim = num_layers * 2  # 决策网络输出维度
     model = model_self.TransformerModel(input_dim, model_dim, num_heads, num_layers, output_dim).to(device)
-    criterion = nn.L1Loss()
+    criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     # X_train [30038, 30, 7], y_train [30038]
     pre_train(data_pre, model, device, criterion, optimizer, num_layers)
@@ -182,7 +207,7 @@ def main_():
             copy_parameters(module.w_1, module.w_1_parallel)
             copy_parameters(module.w_2, module.w_2_parallel)
     data_finetune = finetune_data()
-    finetune(data_finetune, model, device, criterion, optimizer)
+    finetune(data_finetune, model, device, criterion, optimizer, num_layers)
     # 决策网络训练
     agent = agent_net.TransformerModel(input_dim, model_dim, num_heads, num_layers, policy_dim).to(device)
     agent_train(model, agent, data_finetune, device, criterion, optimizer)
@@ -194,20 +219,42 @@ def main_():
             probs = agent(inputs)
             action = gumbel_softmax(probs.view(probs.size(0), -1, 2))
             policy = action[:, :, 1]
-            output = model(inputs,policy)
+            output = model(inputs, policy)
             predictions.append(output.cpu().item())
     predictions_tensor = torch.tensor(predictions, dtype=torch.float32)
-    L1 = criterion(predictions_tensor,data_finetune["y_test"] )
-    print(f'Test L1loss: {L1.item()}')
-    true_values = data_finetune["y_test"].tolist()
-    plt.figure(figsize=(12, 6))
-    plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
-    plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
-    plt.title('True Values vs Predictions')  # 图形标题
-    plt.xlabel('Sample Index')
-    plt.ylabel('Value')
-    plt.legend()
-    plt.show()
+    L1 = criterion(predictions_tensor, data_finetune["y_test"])
+    print(f'spottune_model MSE: {L1.item()}')
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    print("------original_model------")
+    model2 = model_self.TransformerModel(input_dim, model_dim, num_heads, num_layers, output_dim).to(device)
+    criterion2 = nn.MSELoss()
+    optimizer2 = optim.Adam(model2.parameters(), lr=0.001)
+    pre_train(data_pre, model2, device, criterion2, optimizer2, num_layers)
+    control_group_finetune(data_finetune, model2, device, criterion2, optimizer2, num_layers)
+    model2.eval()
+    predictions2 = []
+    policy2 = np.zeros((32, num_layers))
+    with torch.no_grad():
+        for i in range(len(data_finetune["X_test"])):
+            inputs = data_finetune["X_test"][i:i + 1].to(device)
+            output = model2(inputs, policy2)
+            predictions2.append(output.cpu().item())
+    predictions_tensor2 = torch.tensor(predictions2, dtype=torch.float32)
+    L1 = criterion(predictions_tensor2, data_finetune["y_test"])
+    print(f'original_model MSE: {L1.item()}')
+
+    # true_values = data_finetune["y_test"].tolist()
+    # plt.figure(figsize=(12, 6))
+    # plt.plot(true_values, label='True Values', color='blue', marker='o', linestyle='-', markersize=1)  # 真实值折线图
+    # plt.plot(predictions, label='Predictions', color='red', linestyle='-', linewidth=1)  # 预测值折线图
+    # plt.title('True Values vs Predictions')  # 图形标题
+    # plt.xlabel('Sample Index')
+    # plt.ylabel('Value')
+    # plt.legend()
+    # plt.show()
 
 
 if __name__ == '__main__':
