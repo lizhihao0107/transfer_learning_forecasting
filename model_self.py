@@ -155,7 +155,6 @@ class PositionwiseFeedForward(nn.Module):
                 x1[i] = self.w_2(self.dropout(F.relu(self.w_1(x[i]))))
             if action[i] == 1:
                 x1[i] = self.w_2_parallel(self.dropout(F.relu(self.w_1_parallel(x[i]))))
-
         return x1
         # x (30, 10, 512) -> self.w_1 -> (30, 10, 2048)-> relu -> (30, 10, 2048)-> dropout -> (30, 10, 2048)
         # -> self.w_2 -> (30, 10, 512)是输出的shape
